@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import apiClient, { NOTIFICATION_URL } from '../api/apiClient';
+import apiClient, { NOTIFICATION_URL,AUTH_UR } from '../api/apiClient';
 
 export default function Navbar() {
     const { user, logout } = useContext(AuthContext);
@@ -13,6 +13,9 @@ export default function Navbar() {
     const [showDropdown, setShowDropdown] = useState(false);
     const dropdownRef = useRef(null);
 
+    // Avatar State
+    const [avatarUrl, setAvatarUrl] = useState(null);
+
     // Fetch notifications ONLY if user is a logged-in PLAYER
     useEffect(() => {
         if (user && user.role === 'PLAYER') {
@@ -20,6 +23,28 @@ export default function Navbar() {
             // Poll for new notifications every 30 seconds
             const interval = setInterval(fetchNotifications, 30000);
             return () => clearInterval(interval);
+        }
+    }, [user]);
+
+    // Fetch Avatar Logic
+    useEffect(() => {
+        if (user && user.role === 'PLAYER') {
+            const fetchAvatar = async () => {
+                try {
+                    const res = await apiClient.get(`${AUTH_URL}/profile`);
+                    setAvatarUrl(res.data.avatar);
+                } catch (error) {
+                    console.error("Failed to fetch avatar for navbar");
+                }
+            };
+            
+            fetchAvatar(); // Fetch immediately on load
+
+            // Listen for the custom event we created in PlayerProfile.jsx!
+            const handleAvatarUpdate = () => fetchAvatar();
+            window.addEventListener('avatarUpdated', handleAvatarUpdate);
+
+            return () => window.removeEventListener('avatarUpdated', handleAvatarUpdate);
         }
     }, [user]);
 
@@ -77,8 +102,23 @@ export default function Navbar() {
                                 <Link to="/venues" className="text-slate-300 hover:text-white transition">Find Courts</Link>
                             )}
                                                        
+                            {/* PROFILE - VISIBLE TO PLAYERS ONLY */}
+                            {/* PROFILE AVATAR - VISIBLE TO PLAYERS ONLY */}
                             {user.role === 'PLAYER' && (
-                                <Link to="/my-bookings" className="text-slate-300 hover:text-white transition">My Bookings</Link>
+                                <Link to="/profile" className="relative hover:opacity-80 transition transform hover:scale-105">
+                                    {avatarUrl ? (
+                                        <img 
+                                            src={avatarUrl} 
+                                            alt="Profile" 
+                                            className="w-10 h-10 rounded-full border-2 border-emerald-500 shadow-lg bg-slate-700" 
+                                        />
+                                    ) : (
+                                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border-2 border-slate-600 hover:border-emerald-500 transition">
+                                            {/* Default User SVG Logo */}
+                                            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                                        </div>
+                                    )}
+                                </Link>
                             )}
 
                             {user.role === 'ACADEMY_OWNER' && (

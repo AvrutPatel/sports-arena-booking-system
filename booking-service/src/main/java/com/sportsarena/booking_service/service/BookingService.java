@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -29,6 +30,9 @@ public class BookingService {
 
     @Autowired
     private FacilityClosureRepository closureRepository;
+
+    @Autowired
+    private RestTemplate restTemplate;
 
     // Retrieve the authenticated user's booking history
     public List<Booking> getAuthenticatedUserBookings() {
@@ -69,7 +73,7 @@ public class BookingService {
         return timeline;
     }
 
-    // Process and commit a new booking with transactional safety
+    // Process and commit a new booking with transactional safety and WALLET DEDUCTION
     @Transactional
     public String checkAndCreateBooking(BookingRequestDto dto) {
         LocalDate today = LocalDate.now();
@@ -99,6 +103,30 @@ public class BookingService {
             throw new RuntimeException("Validation Failure: Selected slot has already been reserved.");
         }
 
+        // --- NEW: WALLET DEDUCTION LOGIC ---
+        String authenticatedEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+
+        // Grab the JWT token from the incoming request so we can forward it to the auth-service
+        org.springframework.web.context.request.ServletRequestAttributes attributes =
+                (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        String jwtToken = attributes.getRequest().getHeader("Authorization");
+
+        // IMPORTANT: Ensure this URL matches your auth-service port (currently set to 8080)
+        String authServiceUrl = "http://localhost:8080/api/auth/profile/wallet/deduct?amount=" + dto.getTotalAmount();
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("Authorization", jwtToken);
+        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+
+        try {
+            // Attempt to deduct funds. If they have enough, this succeeds and execution continues.
+            restTemplate.exchange(authServiceUrl, org.springframework.http.HttpMethod.POST, entity, String.class);
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            // If the auth-service throws a 400 Bad Request, block the booking here!
+            throw new RuntimeException("Booking failed: Insufficient wallet balance. Please add funds to your profile.");
+        }
+        // --- END WALLET DEDUCTION ---
+
         Booking booking = new Booking();
         booking.setCourtId(dto.getCourtId());
         booking.setVenueId(dto.getVenueId());
@@ -106,32 +134,11 @@ public class BookingService {
         booking.setStartTime(dto.getStartTime());
         booking.setEndTime(dto.getEndTime());
         booking.setTotalAmount(dto.getTotalAmount());
-
-        String authenticatedEmail = SecurityContextHolder.getContext().getAuthentication().getName();
         booking.setUserEmail(authenticatedEmail);
+        booking.setStatus("CONFIRMED");
 
         bookingRepository.save(booking);
-        return "Reservation successfully processed! Transaction Token: " + booking.getId();
-    }
-
-    // Securely cancel a booking
-    @Transactional
-    public String cancelBooking(java.util.UUID bookingId) {
-        // 1. Look up the existing transaction record
-        Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new RuntimeException("Error: Booking record not found."));
-
-        // 2. Verification: Ensure users can only modify their own transactions
-        String currentEmail = SecurityContextHolder.getContext().getAuthentication().getName();
-        if (!booking.getUserEmail().equalsIgnoreCase(currentEmail)) {
-            throw new RuntimeException("Access Denied: Unauthorized cancellation attempt.");
-        }
-
-        // 3. Update status to free the slot
-        booking.setStatus("CANCELLED");
-        bookingRepository.save(booking);
-
-        return "Reservation " + bookingId + " has been successfully cancelled.";
+        return "Reservation successfully processed! ₹" + dto.getTotalAmount() + " deducted from your wallet. Token: " + booking.getId();
     }
 
     public Booking getBookingByIdForUpdate(java.util.UUID bookingId) {
@@ -139,15 +146,46 @@ public class BookingService {
                 .orElseThrow(() -> new RuntimeException("Error: Booking record not found."));
     }
 
-    public void saveUpdatedBooking(Booking booking) {
+    // Securely cancel a single booking (Case 1) ---
+    @Transactional
+    public String cancelBooking(java.util.UUID bookingId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Error: Booking record not found."));
+
+        String currentEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!booking.getUserEmail().equalsIgnoreCase(currentEmail)) {
+            throw new RuntimeException("Access Denied: Unauthorized cancellation attempt.");
+        }
+
+        // 1. Calculate Refund
+        double refundPercentage = calculateRefundPercentage(booking.getBookingDate());
+        double refundAmount = booking.getTotalAmount() * refundPercentage;
+
+        // 2. Process Refund Cross-Service
+        if (refundAmount > 0) {
+            processCrossServiceRefund(booking.getUserEmail(), refundAmount);
+        }
+
+        // 3. Update status
+        booking.setStatus("CANCELLED");
         bookingRepository.save(booking);
+
+        // 4. Send Notification
+        String msg = String.format(
+                "You cancelled your booking on %s. Based on our policy, a %.0f%% refund of ₹%.2f has been credited to your wallet.",
+                booking.getBookingDate(), (refundPercentage * 100), refundAmount
+        );
+        notificationRepository.save(new com.sportsarena.booking_service.entity.Notification(booking.getUserEmail(), msg));
+
+        return "Reservation cancelled. ₹" + refundAmount + " refunded to your wallet.";
     }
 
+    // Owner bulk cancellation (Case 2) ---
     @Transactional
     public int bulkCancelBookings(BulkCancelRequestDto request) {
         List<Booking> affectedBookings;
 
-        // 1. Strategically hunt down the correct bookings
+        // Hunt down bookings based on request...
         if (request.getCourtId() != null) {
             if (request.getEndDate() != null) {
                 affectedBookings = bookingRepository.findByCourtIdAndBookingDateBetweenAndStatus(
@@ -163,39 +201,95 @@ public class BookingService {
             throw new IllegalArgumentException("Must provide either a venueId or courtId");
         }
 
-        // 2. Process cancellations and notify the players
+        // Process cancellations, refund 100%, and notify players
         for (Booking booking : affectedBookings) {
-            // Cancel it
+
+            // 1. Give 100% Refund!
+            processCrossServiceRefund(booking.getUserEmail(), booking.getTotalAmount());
+
+            // 2. Cancel it
             booking.setStatus("CANCELLED");
             bookingRepository.save(booking);
 
-            // Construct the apology notification
-            String baseMessage = "Alert: Your booking for Court " + booking.getCourtId() + " on " + booking.getBookingDate() + " was forcefully canceled by the academy owner.";
+            // 3. Construct Notification with Refund Proof
+            String baseMessage = "Alert: Your booking for Court " + booking.getCourtId() + " on " + booking.getBookingDate() +
+                    " was forcefully canceled by the academy. A 100% refund of ₹" + booking.getTotalAmount() +
+                    " has been credited back to your wallet.";
+
             String finalMessage = (request.getMessage() != null && !request.getMessage().trim().isEmpty())
                     ? baseMessage + " Reason: " + request.getMessage()
                     : baseMessage;
 
-            // Save the notification to the database using the player's email
-            // (Assumes your Booking entity tracks the user's email as userEmail)
-            com.sportsarena.booking_service.entity.Notification notification =
-                    new com.sportsarena.booking_service.entity.Notification(booking.getUserEmail(), finalMessage);
-
-            notificationRepository.save(notification);
+            notificationRepository.save(new com.sportsarena.booking_service.entity.Notification(booking.getUserEmail(), finalMessage));
         }
 
+        // Save Facility Closure roadblock...
         FacilityClosure closure = new FacilityClosure();
         closure.setVenueId(request.getVenueId());
         closure.setCourtId(request.getCourtId());
         closure.setStartDate(request.getStartDate());
         closure.setEndDate(request.getEndDate());
-        closure.setReason(request.getMessage() != null && !request.getMessage().trim().isEmpty()
-                ? request.getMessage()
-                : "Closed by academy administration.");
-
+        closure.setReason(request.getMessage() != null && !request.getMessage().trim().isEmpty() ? request.getMessage() : "Closed by academy administration.");
         closureRepository.save(closure);
 
         return affectedBookings.size();
     }
+
+    // Generates the preview for the frontend warning UI
+    public java.util.Map<String, Object> getRefundPreview(java.util.UUID bookingId) {
+        Booking booking = bookingRepository.findById(bookingId).orElseThrow();
+
+        double refundPercentage = calculateRefundPercentage(booking.getBookingDate());
+        double refundAmount = booking.getTotalAmount() * refundPercentage;
+
+        java.util.Map<String, Object> response = new java.util.HashMap<>();
+        response.put("refundPercentage", refundPercentage * 100);
+        response.put("refundAmount", refundAmount);
+        response.put("totalAmount", booking.getTotalAmount());
+
+        return response;
+    }
+
+    // Mathematical Backend Policy Engine
+    private double calculateRefundPercentage(LocalDate bookingDate) {
+        LocalDate today = LocalDate.now();
+        long daysUntilBooking = java.time.temporal.ChronoUnit.DAYS.between(today, bookingDate);
+
+        if (daysUntilBooking > 7) {
+            return 1.0;  // 100% if > 1 week
+        } else if (daysUntilBooking > 1) {
+            return 0.75; // 75% if between 1 day and 1 week
+        } else {
+            return 0.50; // 50% if <= 1 day
+        }
+    }
+
+    // Cross-Service Caller
+    private void processCrossServiceRefund(String targetEmail, double amount) {
+        // Extract current JWT token to bypass security
+        org.springframework.web.context.request.ServletRequestAttributes attributes =
+                (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        String jwtToken = attributes.getRequest().getHeader("Authorization");
+
+        // Make sure this port matches your Auth Service
+        String url = "http://localhost:8080/api/auth/profile/wallet/refund?targetEmail=" + targetEmail + "&amount=" + amount;
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("Authorization", jwtToken);
+        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+
+        try {
+            restTemplate.exchange(url, org.springframework.http.HttpMethod.POST, entity, String.class);
+        } catch (Exception e) {
+            System.err.println("Failed to process refund for " + targetEmail + ". Ensure Auth Service is running.");
+        }
+    }
+
+
+    public void saveUpdatedBooking(Booking booking) {
+        bookingRepository.save(booking);
+    }
+
 
     public List<FacilityClosure> getClosuresForVenue(Long venueId) {
         return closureRepository.findByVenueIdOrderByStartDateDesc(venueId);

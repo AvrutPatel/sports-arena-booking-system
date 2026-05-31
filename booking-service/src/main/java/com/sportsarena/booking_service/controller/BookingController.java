@@ -3,6 +3,7 @@ package com.sportsarena.booking_service.controller;
 import com.sportsarena.booking_service.dto.BookingRequestDto;
 import com.sportsarena.booking_service.dto.SlotResponseDto;
 import com.sportsarena.booking_service.entity.Booking;
+import com.sportsarena.booking_service.entity.FacilityClosure;
 import com.sportsarena.booking_service.repository.FacilityClosureRepository;
 import com.sportsarena.booking_service.service.BookingService;
 import jakarta.validation.Valid;
@@ -95,7 +96,7 @@ public class BookingController {
     }
 
     @GetMapping("/admin/closures/venue/{venueId}")
-    public ResponseEntity<List<com.sportsarena.booking_service.entity.FacilityClosure>> getVenueClosures(@PathVariable Long venueId) {
+    public ResponseEntity<List<FacilityClosure>> getVenueClosures(@PathVariable Long venueId) {
         // Security check ensures only owners can view this
         String role = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
         if (!role.contains("ACADEMY_OWNER")) return ResponseEntity.status(403).build();
@@ -123,5 +124,10 @@ public class BookingController {
         }
 
         return ResponseEntity.ok(bookingService.getBookingsByVenue(venueId));
+    }
+
+    @GetMapping("/{bookingId}/refund-preview")
+    public ResponseEntity<java.util.Map<String, Object>> getRefundPreview(@PathVariable java.util.UUID bookingId) {
+        return ResponseEntity.ok(bookingService.getRefundPreview(bookingId));
     }
 }
