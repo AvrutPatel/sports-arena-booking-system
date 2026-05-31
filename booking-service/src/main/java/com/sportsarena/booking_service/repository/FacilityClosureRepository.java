@@ -19,4 +19,6 @@ public interface FacilityClosureRepository extends JpaRepository<FacilityClosure
             @Param("courtId") Long courtId,
             @Param("venueId") Long venueId,
             @Param("targetDate") LocalDate targetDate);
+
+    List<FacilityClosure> findByVenueIdOrderByStartDateDesc(Long venueId);
 }

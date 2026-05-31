@@ -19,7 +19,7 @@ public class CourtController {
     private CourtService courtService;
 
     // Only Academy Owners can add courts
-    @PostMapping("/courts")
+    @PostMapping
     @PreAuthorize("hasRole('ACADEMY_OWNER')")
     public ResponseEntity<String> addCourt(@Valid @RequestBody CourtRequestDto courtDto) {
         String response = courtService.createCourt(courtDto);
@@ -32,7 +32,6 @@ public class CourtController {
         return ResponseEntity.ok(courtService.getCourtsByVenue(venueId));
     }
 
-    // ADD THIS INSIDE CourtController.java
     @PatchMapping("/{courtId}/rate")
     public ResponseEntity<com.sportsarena.venue_service.dto.CourtResponseDto> updateCourtRate(
             @PathVariable Long courtId,

@@ -2,6 +2,7 @@ package com.sportsarena.booking_service.controller;
 
 import com.sportsarena.booking_service.dto.BookingRequestDto;
 import com.sportsarena.booking_service.dto.SlotResponseDto;
+import com.sportsarena.booking_service.entity.Booking;
 import com.sportsarena.booking_service.repository.FacilityClosureRepository;
 import com.sportsarena.booking_service.service.BookingService;
 import jakarta.validation.Valid;
@@ -91,5 +92,36 @@ public class BookingController {
         }
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/admin/closures/venue/{venueId}")
+    public ResponseEntity<List<com.sportsarena.booking_service.entity.FacilityClosure>> getVenueClosures(@PathVariable Long venueId) {
+        // Security check ensures only owners can view this
+        String role = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
+        if (!role.contains("ACADEMY_OWNER")) return ResponseEntity.status(403).build();
+
+        return ResponseEntity.ok(bookingService.getClosuresForVenue(venueId));
+    }
+
+    @DeleteMapping("/admin/closures/{closureId}")
+    public ResponseEntity<String> removeClosure(@PathVariable Long closureId) {
+        String role = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
+        if (!role.contains("ACADEMY_OWNER")) return ResponseEntity.status(403).build();
+
+        bookingService.removeClosure(closureId);
+        return ResponseEntity.ok("Facility successfully reactivated.");
+    }
+
+    // Add this to BookingController.java
+    @GetMapping("/admin/venue/{venueId}")
+    public ResponseEntity<List<Booking>> getBookingsForVenue(@PathVariable Long venueId) {
+
+        // Security check
+        String role = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
+        if (!role.contains("ACADEMY_OWNER")) {
+            return org.springframework.http.ResponseEntity.status(403).build();
+        }
+
+        return ResponseEntity.ok(bookingService.getBookingsByVenue(venueId));
     }
 }

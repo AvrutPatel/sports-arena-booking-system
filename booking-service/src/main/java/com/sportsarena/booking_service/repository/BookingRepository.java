@@ -40,4 +40,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     // 3. Find future active bookings for an ENTIRE venue forever onwards
     List<Booking> findByVenueIdAndBookingDateGreaterThanEqualAndStatus(Long venueId, LocalDate startDate, String status);
+
+    // Fetch all bookings for a venue, sorted by date (newest first)
+    List<com.sportsarena.booking_service.entity.Booking> findByVenueIdOrderByBookingDateDesc(Long venueId);
 }

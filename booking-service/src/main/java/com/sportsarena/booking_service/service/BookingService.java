@@ -196,4 +196,17 @@ public class BookingService {
 
         return affectedBookings.size();
     }
+
+    public List<FacilityClosure> getClosuresForVenue(Long venueId) {
+        return closureRepository.findByVenueIdOrderByStartDateDesc(venueId);
+    }
+
+    public void removeClosure(Long closureId) {
+        closureRepository.deleteById(closureId);
+    }
+
+    // Add this to BookingService.java
+    public List<com.sportsarena.booking_service.entity.Booking> getBookingsByVenue(Long venueId) {
+        return bookingRepository.findByVenueIdOrderByBookingDateDesc(venueId);
+    }
 }
