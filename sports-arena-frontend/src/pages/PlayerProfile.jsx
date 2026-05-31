@@ -33,6 +33,9 @@ export default function PlayerProfile() {
     const [reviewModal, setReviewModal] = useState({ isOpen: false, booking: null });
     const [reviewForm, setReviewForm] = useState({ rating: 0, comment: '', applyToCourt: false });
 
+    // --- NEW: Cancel Modal State ---
+    const [cancelModal, setCancelModal] = useState({ isOpen: false, bookingId: null, preview: null, isLoading: false, error: '' });
+
     // Load everything on mount
     useEffect(() => {
         if (!user || user.role !== 'PLAYER') {
@@ -74,9 +77,7 @@ export default function PlayerProfile() {
             };
             await apiClient.put(`${AUTH_URL}/profile`, payload);
             setStatusMessage({ type: 'success', text: 'Profile updated successfully!' });
-            setIsEditing(false); // Turn off edit mode
-            
-            // Tell the Navbar to instantly refresh the avatar!
+            setIsEditing(false); 
             window.dispatchEvent(new Event('avatarUpdated')); 
         } catch (error) {
             setStatusMessage({ type: 'error', text: 'Failed to update profile.' });
@@ -124,19 +125,39 @@ export default function PlayerProfile() {
     };
 
     // --- TAB 4: BOOKINGS LOGIC ---
-    const handleCancel = async (bookingId) => {
+
+    // 1. Fetch Refund Preview and open Modal
+    const initiateCancel = async (bookingId) => {
+        setCancelModal({ isOpen: true, bookingId: bookingId, preview: null, isLoading: true, error: '' });
+        try {
+            const res = await apiClient.get(`${BOOKING_URL}/${bookingId}/refund-preview`);
+            setCancelModal(prev => ({ ...prev, preview: res.data, isLoading: false }));
+        } catch (err) {
+            setCancelModal(prev => ({ ...prev, isLoading: false, error: 'Failed to load refund details.' }));
+        }
+    };
+
+    // 2. Execute the actual cancellation
+    const confirmCancel = async () => {
         setStatusMessage({ type: '', text: '' });
-        if (!window.confirm("Are you sure you want to cancel this booking?")) return;
+        const targetBookingId = cancelModal.bookingId;
+        setCancelModal({ isOpen: false, bookingId: null, preview: null, isLoading: false, error: '' });
 
         try {
-            const response = await apiClient.patch(`${BOOKING_URL}/${bookingId}/cancel`);
+            const response = await apiClient.patch(`${BOOKING_URL}/${targetBookingId}/cancel`);
             setStatusMessage({ type: 'success', text: response.data });
 
+            // Instantly update local bookings state
             setMyBookings(prevBookings =>
                 prevBookings.map(b =>
-                    b.id === bookingId ? { ...b, status: 'CANCELLED' } : b
+                    b.id === targetBookingId ? { ...b, status: 'CANCELLED' } : b
                 )
             );
+
+            // Fetch the profile again to refresh the wallet balance dynamically!
+            const profileRes = await apiClient.get(`${AUTH_URL}/profile`);
+            setProfile(prev => ({ ...prev, walletBalance: profileRes.data.walletBalance }));
+
         } catch (err) {
             setStatusMessage({
                 type: 'error',
@@ -150,7 +171,6 @@ export default function PlayerProfile() {
 
         try {
             const booking = reviewModal.booking;
-            
             const reviewPayload = {
                 bookingId: booking.id,
                 venueId: booking.venueId, 
@@ -196,7 +216,7 @@ export default function PlayerProfile() {
                 </div>
                 <div className="bg-slate-800 border border-slate-700 px-6 py-3 rounded-lg shadow-lg text-right w-full md:w-auto">
                     <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">Wallet Balance</p>
-                    <p className="text-3xl font-bold text-white">₹{profile.walletBalance.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-white transition-all">₹{profile.walletBalance.toFixed(2)}</p>
                 </div>
             </div>
 
@@ -206,57 +226,83 @@ export default function PlayerProfile() {
                 </div>
             )}
 
+            {/* --- CANCELLATION WARNING MODAL --- */}
+            {cancelModal.isOpen && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 p-8 rounded-lg shadow-2xl border border-red-500 w-full max-w-md animate-fadeIn">
+                        <h2 className="text-2xl font-bold text-white mb-2">Cancel Booking?</h2>
+                        
+                        {cancelModal.isLoading ? (
+                            <div className="py-8 text-center text-slate-400 animate-pulse">Calculating refund details...</div>
+                        ) : cancelModal.error ? (
+                            <div className="py-4 text-red-400">{cancelModal.error}</div>
+                        ) : cancelModal.preview && (
+                            <div className="mb-6 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                                <p className="text-slate-300 text-sm mb-4">
+                                    Based on our cancellation policy and the proximity to your booking date, you are eligible for a 
+                                    <strong className="text-white ml-1">{cancelModal.preview.refundPercentage}% refund</strong>.
+                                </p>
+                                
+                                <div className="flex justify-between items-center border-t border-slate-700 pt-3">
+                                    <span className="text-slate-400 font-medium">Refund Amount:</span>
+                                    <span className={`text-xl font-bold ${cancelModal.preview.refundPercentage === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                        + ₹{cancelModal.preview.refundAmount.toFixed(2)}
+                                    </span>
+                                </div>
+                                
+                                {cancelModal.preview.refundPercentage < 100 && (
+                                    <p className="text-xs text-red-400 mt-3 bg-red-500/10 p-2 rounded">
+                                        Note: Late cancellations incur a penalty fee. The refund will be credited instantly to your digital wallet.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="flex gap-4">
+                            <button 
+                                onClick={() => setCancelModal({ isOpen: false, bookingId: null, preview: null, isLoading: false, error: '' })}
+                                className="flex-1 bg-slate-600 hover:bg-slate-500 text-white py-3 rounded transition font-medium"
+                            >
+                                Keep Booking
+                            </button>
+                            <button 
+                                onClick={confirmCancel}
+                                disabled={cancelModal.isLoading}
+                                className={`flex-1 py-3 rounded transition font-bold ${cancelModal.isLoading ? 'bg-red-800 text-slate-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white shadow-lg'}`}
+                            >
+                                Confirm Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* REVIEW MODAL OVERLAY */}
             {reviewModal.isOpen && (
                 <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-                    <div className="bg-slate-800 p-8 rounded-lg shadow-2xl border border-emerald-500 w-full max-w-md">
+                    <div className="bg-slate-800 p-8 rounded-lg shadow-2xl border border-emerald-500 w-full max-w-md animate-fadeIn">
                         <h2 className="text-2xl font-bold text-white mb-4">Leave a Review</h2>
                         
                         <div className="flex gap-2 mb-6">
                             {[1, 2, 3, 4, 5].map(star => (
-                                <button 
-                                    key={star} 
-                                    onClick={() => setReviewForm({...reviewForm, rating: star})}
-                                    className={`text-4xl transition ${reviewForm.rating >= star ? 'text-amber-400' : 'text-slate-600 hover:text-amber-200'}`}
-                                >
+                                <button key={star} onClick={() => setReviewForm({...reviewForm, rating: star})} className={`text-4xl transition ${reviewForm.rating >= star ? 'text-amber-400' : 'text-slate-600 hover:text-amber-200'}`}>
                                     ★
                                 </button>
                             ))}
                         </div>
 
-                        <textarea 
-                            placeholder="Tell us about your experience..."
-                            className="w-full bg-slate-700 text-white rounded p-3 mb-4 outline-none focus:ring-2 focus:ring-emerald-500 h-24 resize-none border border-slate-600"
-                            value={reviewForm.comment}
-                            onChange={(e) => setReviewForm({...reviewForm, comment: e.target.value})}
-                        />
+                        <textarea placeholder="Tell us about your experience..." className="w-full bg-slate-700 text-white rounded p-3 mb-4 outline-none focus:ring-2 focus:ring-emerald-500 h-24 resize-none border border-slate-600" value={reviewForm.comment} onChange={(e) => setReviewForm({...reviewForm, comment: e.target.value})} />
 
                         <label className="flex items-center gap-3 text-slate-300 mb-6 cursor-pointer bg-slate-900/50 p-3 rounded border border-slate-700">
-                            <input 
-                                type="checkbox" 
-                                className="w-5 h-5 accent-emerald-500 cursor-pointer"
-                                checked={reviewForm.applyToCourt}
-                                onChange={(e) => setReviewForm({...reviewForm, applyToCourt: e.target.checked})}
-                            />
-                            <span className="text-sm">
-                                Apply this review specifically to <b>Court #{reviewModal.booking?.courtId}</b>
-                            </span>
+                            <input type="checkbox" className="w-5 h-5 accent-emerald-500 cursor-pointer" checked={reviewForm.applyToCourt} onChange={(e) => setReviewForm({...reviewForm, applyToCourt: e.target.checked})} />
+                            <span className="text-sm">Apply this review specifically to <b>Court #{reviewModal.booking?.courtId}</b></span>
                         </label>
 
                         <div className="flex gap-4">
-                            <button 
-                                onClick={() => {
-                                    setReviewModal({ isOpen: false, booking: null });
-                                    setReviewForm({ rating: 0, comment: '', applyToCourt: false });
-                                }}
-                                className="flex-1 bg-slate-600 hover:bg-slate-500 text-white py-3 rounded transition font-medium"
-                            >
+                            <button onClick={() => { setReviewModal({ isOpen: false, booking: null }); setReviewForm({ rating: 0, comment: '', applyToCourt: false }); }} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white py-3 rounded transition font-medium">
                                 Cancel
                             </button>
-                            <button 
-                                onClick={submitReview}
-                                className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-slate-900 py-3 rounded transition font-bold"
-                            >
+                            <button onClick={submitReview} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-slate-900 py-3 rounded transition font-bold">
                                 Submit Review
                             </button>
                         </div>
@@ -423,7 +469,7 @@ export default function PlayerProfile() {
                     </div>
                 )}
 
-                {/* 4. MY BOOKINGS TAB (Restored Logic) */}
+                {/* 4. MY BOOKINGS TAB */}
                 {activeTab === 'BOOKINGS' && (
                     <div className="animate-fadeIn">
                         <h2 className="text-2xl font-bold text-white mb-6">Booking History</h2>
@@ -451,7 +497,7 @@ export default function PlayerProfile() {
                                                 </div>
                                                 <div className="text-slate-400 grid grid-cols-2 md:flex md:gap-6 gap-y-2 text-sm font-medium">
                                                     <p><span className="text-slate-500">Date:</span> {booking.bookingDate}</p>
-                                                    <p><span className="text-slate-500">Amount:</span> <span className="text-emerald-400">₹{booking.totalAmount}</span></p>
+                                                    <p><span className="text-slate-500">Paid:</span> <span className="text-emerald-400">₹{booking.totalAmount}</span></p>
                                                     <p><span className="text-slate-500">Time:</span> {booking.startTime.substring(0, 5)} - {booking.endTime.substring(0, 5)}</p>
                                                 </div>
                                             </div>
@@ -470,8 +516,9 @@ export default function PlayerProfile() {
                                                     </span>
                                                 )}
 
+                                                {/* TRIGGER NEW CANCEL MODAL INSTEAD OF WINDOW.CONFIRM */}
                                                 {active && upcoming && (
-                                                    <button onClick={() => handleCancel(booking.id)} className="bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 border border-red-500/50 font-medium py-2 px-6 rounded transition whitespace-nowrap">
+                                                    <button onClick={() => initiateCancel(booking.id)} className="bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 border border-red-500/50 font-medium py-2 px-6 rounded transition whitespace-nowrap">
                                                         Cancel Booking
                                                     </button>
                                                 )}
