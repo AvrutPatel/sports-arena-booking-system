@@ -14,14 +14,14 @@ import java.util.UUID;
 @Repository
 public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
-    // Fetch existing active reservations for a given court and day
+    // Find active bookings by court and date
     List<Booking> findByCourtIdAndBookingDateAndStatus(Long courtId, LocalDate bookingDate, String status);
 
-    // Advanced collision boundary query to identify overlapping time ranges
+    // Check overlapping time ranges
     @Query("SELECT COUNT(b) FROM Booking b " +
             "WHERE b.courtId = :courtId " +
             "AND b.bookingDate = :bookingDate " +
-            "AND b.status = 'CONFIRMED' " +
+            "AND b.status IN ('CONFIRMED', 'PENDING') " +
             "AND (:startTime < b.endTime AND :endTime > b.startTime)")
     long countOverlappingBookings(
             @Param("courtId") Long courtId,
@@ -32,15 +32,18 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     List<Booking> findByUserEmailOrderByBookingDateDesc(String userEmail);
 
-    // 1. Find future active bookings for a specific court within a date range
+    // Find bookings in date range
     List<Booking> findByCourtIdAndBookingDateBetweenAndStatus(Long courtId, LocalDate startDate, LocalDate endDate, String status);
 
-    // 2. Find future active bookings for a specific court forever onwards
+    // Find future court bookings
     List<Booking> findByCourtIdAndBookingDateGreaterThanEqualAndStatus(Long courtId, LocalDate startDate, String status);
 
-    // 3. Find future active bookings for an ENTIRE venue forever onwards
+    // Find future venue bookings
     List<Booking> findByVenueIdAndBookingDateGreaterThanEqualAndStatus(Long venueId, LocalDate startDate, String status);
 
-    // Fetch all bookings for a venue, sorted by date (newest first)
+    // Find all venue bookings sorted
     List<com.sportsarena.booking_service.entity.Booking> findByVenueIdOrderByBookingDateDesc(Long venueId);
+
+    // Find stale pending bookings
+    List<Booking> findByStatusAndCreatedAtBefore(String status, java.time.LocalDateTime threshold);
 }

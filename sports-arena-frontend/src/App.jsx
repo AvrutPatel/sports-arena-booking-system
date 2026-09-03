@@ -8,6 +8,7 @@ import VenueDiscovery from './pages/VenueDiscovery';
 import VenueDetails from './pages/VenueDetails';
 import ManageAcademy from './pages/ManageAcademy';
 import PlayerProfile from './pages/PlayerProfile';
+import Maintenance from './pages/Maintenance';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/venues/:id" element={<VenueDetails />} />
           <Route path="/manage-academy" element={<ManageAcademy />} />
           <Route path="/profile" element={<PlayerProfile />} /> 
+          <Route path="/maintenance" element={<Maintenance />} />
         </Routes>
       </main>
     </div>

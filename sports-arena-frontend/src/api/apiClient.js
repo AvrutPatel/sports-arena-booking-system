@@ -14,11 +14,27 @@ apiClient.interceptors.request.use((config) => {
     return Promise.reject(error);
 });
 
+// Interceptor: Global response handling (downtime & server errors)
+apiClient.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        // If there's no response (Network Error / Gateway is down)
+        // OR the status is 502, 503, 504 (Gateway is up but service is down)
+        if (!error.response || [502, 503, 504].includes(error.response.status)) {
+            // Prevent redirect loop if already on maintenance page
+            if (window.location.pathname !== '/maintenance') {
+                window.location.href = '/maintenance';
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
 // Exporting your three microservice base URLs for easy access
 export const AUTH_URL = 'http://localhost:8080/api/auth';
-export const VENUE_URL = 'http://localhost:8081/api';
-export const BOOKING_URL = 'http://localhost:8082/api/bookings';
-export const REVIEW_URL = 'http://localhost:8081/api/reviews';
-export const NOTIFICATION_URL = 'http://localhost:8082/api/notifications';
+export const VENUE_URL = 'http://localhost:8080/api';
+export const BOOKING_URL = 'http://localhost:8080/api/bookings';
+export const REVIEW_URL = 'http://localhost:8080/api/reviews';
+export const NOTIFICATION_URL = 'http://localhost:8080/api/notifications';
 
 export default apiClient;

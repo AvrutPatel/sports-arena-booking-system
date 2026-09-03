@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import apiClient, { NOTIFICATION_URL,AUTH_UR } from '../api/apiClient';
+import apiClient, { NOTIFICATION_URL, AUTH_URL } from '../api/apiClient';
 
 export default function Navbar() {
     const { user, logout } = useContext(AuthContext);

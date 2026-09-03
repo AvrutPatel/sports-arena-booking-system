@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.context.SecurityContextHolder;
+import com.sportsarena.venue_service.dto.CourtUpdateRequestDto;
 
 import java.util.List;
 
@@ -33,11 +35,11 @@ public class CourtController {
     }
 
     @PatchMapping("/{courtId}/rate")
-    public ResponseEntity<com.sportsarena.venue_service.dto.CourtResponseDto> updateCourtRate(
+    public ResponseEntity<CourtResponseDto> updateCourtRate(
             @PathVariable Long courtId,
-            @RequestBody com.sportsarena.venue_service.dto.CourtUpdateRequestDto dto) {
+            @RequestBody CourtUpdateRequestDto dto) {
 
-        String ownerId = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+        String ownerId = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.ok(courtService.updateCourtRate(courtId, dto.getHourlyRate(), ownerId));
     }
 }

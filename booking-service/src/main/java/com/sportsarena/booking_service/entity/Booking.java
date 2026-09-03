@@ -18,10 +18,10 @@ public class Booking {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    // References the user email from auth-service
+    // Auth-service email
     private String userEmail;
 
-    // References the physical court id from venue-service
+    // Venue-service court ID
     private Long courtId;
 
     private LocalDate bookingDate;
@@ -36,5 +36,7 @@ public class Booking {
 
     private Long venueId;
 
-    private String status = "CONFIRMED"; // CONFIRMED, CANCELLED
+    private String status = "CONFIRMED"; // Status values: CONFIRMED, CANCELLED, PENDING, FAILED
+
+    private java.time.LocalDateTime createdAt = java.time.LocalDateTime.now();
 }

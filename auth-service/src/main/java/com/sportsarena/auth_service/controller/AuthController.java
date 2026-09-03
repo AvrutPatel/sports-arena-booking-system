@@ -6,7 +6,11 @@ import com.sportsarena.auth_service.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import com.sportsarena.auth_service.security.JwtUtil;
+import com.sportsarena.auth_service.dto.LoginDto;
+import com.sportsarena.auth_service.entity.User;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -19,10 +23,10 @@ public class AuthController {
     private UserRepository userRepository;
 
     @Autowired
-    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private com.sportsarena.auth_service.security.JwtUtil jwtUtil;
+    private JwtUtil jwtUtil;
 
     @PostMapping("/register")
     public ResponseEntity<String> registerUser(@Valid @RequestBody UserRegistrationDto userDto) {
@@ -32,9 +36,9 @@ public class AuthController {
 
     // Add this new endpoint
     @PostMapping("/login")
-    public ResponseEntity<String> login(@Valid @RequestBody com.sportsarena.auth_service.dto.LoginDto loginDto) {
+    public ResponseEntity<String> login(@Valid @RequestBody LoginDto loginDto) {
 
-        com.sportsarena.auth_service.entity.User user = userRepository.findByEmail(loginDto.getEmail())
+        User user = userRepository.findByEmail(loginDto.getEmail())
                 .orElseThrow(() -> new RuntimeException("User not found!"));
 
         if (!passwordEncoder.matches(loginDto.getPassword(), user.getPasswordHash())) {

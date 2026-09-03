@@ -24,6 +24,7 @@ export default function PlayerProfile() {
     const [profile, setProfile] = useState({ fullName: '', avatar: '', interestedSports: [], favoriteVenueIds: [], walletBalance: 0.0 });
     const [allVenues, setAllVenues] = useState([]);
     const [myBookings, setMyBookings] = useState([]);
+    const [courtMap, setCourtMap] = useState({});
     
     // Form & UI States
     const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
@@ -59,7 +60,26 @@ export default function PlayerProfile() {
                 avatar: profileRes.data.avatar || DEFAULT_AVATARS[0] 
             });
             setAllVenues(venuesRes.data);
-            setMyBookings(bookingsRes.data);
+            
+            const bookings = bookingsRes.data;
+            setMyBookings(bookings);
+
+            // Fetch courts for unique venues in bookings
+            const uniqueVenueIds = [...new Set(bookings.map(b => b.venueId).filter(Boolean))];
+            if (uniqueVenueIds.length > 0) {
+                const courtPromises = uniqueVenueIds.map(vId => 
+                    apiClient.get(`${VENUE_URL}/venues/${vId}/courts`).catch(() => ({ data: [] }))
+                );
+                const courtsResponses = await Promise.all(courtPromises);
+                
+                const cMap = {};
+                courtsResponses.forEach(res => {
+                    res.data.forEach(court => {
+                        cMap[court.id] = court;
+                    });
+                });
+                setCourtMap(cMap);
+            }
         } catch (error) {
             console.error("Failed to load profile data");
         }
@@ -490,7 +510,12 @@ export default function PlayerProfile() {
                                             
                                             <div>
                                                 <div className="flex items-center gap-3 mb-2">
-                                                    <h3 className="text-xl font-bold text-white">Court ID: {booking.courtId}</h3>
+                                                    <h3 className="text-xl font-bold text-white">
+                                                        {courtMap[booking.courtId]?.name || `Court ${booking.courtId}`} 
+                                                        <span className="text-slate-400 font-normal text-lg ml-2">
+                                                            @ {allVenues.find(v => v.id === booking.venueId)?.name || 'Unknown Academy'}
+                                                        </span>
+                                                    </h3>
                                                     <span className={`px-2 py-1 text-xs font-bold rounded ${active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
                                                         {booking.status}
                                                     </span>
