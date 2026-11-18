@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import java.math.BigDecimal;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/auth/profile")
@@ -31,25 +33,23 @@ public class UserProfileController {
     }
 
     @PostMapping("/wallet/add")
-    public ResponseEntity<UserProfile> addFundsToWallet(@RequestParam Double amount) {
-        return ResponseEntity.ok(profileService.addFunds(getCurrentUserEmail(), amount));
+    public ResponseEntity<UserProfile> addFundsToWallet(@RequestParam BigDecimal amount,
+            @RequestHeader("Idempotency-Key") UUID operationId) {
+        return ResponseEntity.ok(profileService.addFunds(getCurrentUserEmail(), amount, operationId));
     }
 
     @PostMapping("/wallet/deduct")
-    public ResponseEntity<?> deductFundsFromWallet(@RequestParam Double amount) {
-        try {
-            return ResponseEntity.ok(profileService.deductFunds(getCurrentUserEmail(), amount));
-        } catch (RuntimeException e) {
-            // Returns a 400 Bad Request if they don't have enough money
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+    public ResponseEntity<UserProfile> deductFundsFromWallet(@RequestParam BigDecimal amount,
+            @RequestHeader("Idempotency-Key") UUID operationId) {
+        return ResponseEntity.ok(profileService.deductFunds(getCurrentUserEmail(), amount, operationId));
     }
 
     // Allows the booking-service to target a specific user for a refund
     @PostMapping("/wallet/refund")
     public ResponseEntity<UserProfile> refundSpecificUserWallet(
-            @RequestParam String targetEmail,
-            @RequestParam Double amount) {
-        return ResponseEntity.ok(profileService.addFunds(targetEmail, amount));
+            @RequestParam UUID debitReference,
+            @RequestParam BigDecimal amount,
+            @RequestHeader("Idempotency-Key") UUID operationId) {
+        return ResponseEntity.ok(profileService.refundFunds(debitReference, amount, operationId));
     }
 }

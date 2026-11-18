@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.util.ArrayList;
 import java.util.List;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "user_profiles")
@@ -26,8 +27,8 @@ public class UserProfile {
     private String avatar;
 
     // The Player's Digital Wallet
-    @Column(nullable = false)
-    private Double walletBalance = 0.0;
+    @Column(nullable = false, precision = 19, scale = 2)
+    private BigDecimal walletBalance = new BigDecimal("0.00");
 
     // A list of strings (e.g., ["Badminton", "Football"])
     @ElementCollection

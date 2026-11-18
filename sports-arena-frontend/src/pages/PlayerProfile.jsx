@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient, { AUTH_URL, BOOKING_URL, VENUE_URL, REVIEW_URL } from '../api/apiClient';
 import { AuthContext } from '../context/AuthContext';
@@ -12,6 +12,11 @@ const DEFAULT_AVATARS = [
 ];
 
 const SPORT_OPTIONS = ['BADMINTON', 'TENNIS', 'FOOTBALL', 'BASKETBALL'];
+const BOOKING_STATUS_LABELS = {
+    PENDING: 'Reserved', PAYMENT_PROCESSING: 'Payment processing', PAYMENT_UNKNOWN: 'Payment verification pending',
+    PAYMENT_RELEASED: 'Payment window closed', REFUND_PENDING: 'Refund processing', CONFIRMED: 'Confirmed',
+    CANCELLED: 'Cancelled', FAILED: 'Not completed', EXPIRED: 'Hold expired'
+};
 
 export default function PlayerProfile() {
     const { user } = useContext(AuthContext);
@@ -24,11 +29,15 @@ export default function PlayerProfile() {
     const [profile, setProfile] = useState({ fullName: '', avatar: '', interestedSports: [], favoriteVenueIds: [], walletBalance: 0.0 });
     const [allVenues, setAllVenues] = useState([]);
     const [myBookings, setMyBookings] = useState([]);
+    const hasRecoveryPending = myBookings.some(booking =>
+        ['PAYMENT_PROCESSING', 'PAYMENT_UNKNOWN', 'PAYMENT_RELEASED', 'REFUND_PENDING'].includes(booking.status));
     const [courtMap, setCourtMap] = useState({});
     
     // Form & UI States
     const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
     const [addFundsAmount, setAddFundsAmount] = useState('');
+    const topUpRequest = useRef(null);
+    const addingFunds = useRef(false);
 
     // Review Modal State
     const [reviewModal, setReviewModal] = useState({ isOpen: false, booking: null });
@@ -46,6 +55,28 @@ export default function PlayerProfile() {
         fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user, navigate]);
+
+    useEffect(() => {
+        if (!user || !hasRecoveryPending) return;
+        let stopped = false;
+        let fetching = false;
+        const timer = setInterval(async () => {
+            if (fetching) return;
+            fetching = true;
+            try {
+                const [bookings, wallet] = await Promise.all([
+                    apiClient.get(`${BOOKING_URL}/my-bookings`), apiClient.get(`${AUTH_URL}/profile`)
+                ]);
+                if (!stopped) {
+                    setMyBookings(bookings.data);
+                    setProfile(previous => ({ ...previous, walletBalance: wallet.data.walletBalance }));
+                }
+            } catch {
+                // Server recovery continues even while this page cannot refresh.
+            } finally { fetching = false; }
+        }, 5000);
+        return () => { stopped = true; clearInterval(timer); };
+    }, [user, hasRecoveryPending]);
 
     const fetchData = async () => {
         try {
@@ -117,14 +148,25 @@ export default function PlayerProfile() {
     const handleAddFunds = async (e) => {
         e.preventDefault();
         if (!addFundsAmount || isNaN(addFundsAmount) || parseFloat(addFundsAmount) <= 0) return;
+        if (addingFunds.current) return;
+        if (!topUpRequest.current || topUpRequest.current.amount !== addFundsAmount) {
+            topUpRequest.current = { amount: addFundsAmount, key: crypto.randomUUID() };
+        }
+        addingFunds.current = true;
 
         try {
-            const res = await apiClient.post(`${AUTH_URL}/profile/wallet/add?amount=${addFundsAmount}`);
+            const res = await apiClient.post(`${AUTH_URL}/profile/wallet/add`, null, {
+                params: { amount: addFundsAmount },
+                headers: { 'Idempotency-Key': topUpRequest.current.key }
+            });
             setProfile(prev => ({ ...prev, walletBalance: res.data.walletBalance }));
+            topUpRequest.current = null;
             setAddFundsAmount('');
             setStatusMessage({ type: 'success', text: `₹${addFundsAmount} added to your wallet!` });
         } catch (error) {
             setStatusMessage({ type: 'error', text: 'Failed to add funds.' });
+        } finally {
+            addingFunds.current = false;
         }
     };
 
@@ -167,12 +209,8 @@ export default function PlayerProfile() {
             const response = await apiClient.patch(`${BOOKING_URL}/${targetBookingId}/cancel`);
             setStatusMessage({ type: 'success', text: response.data });
 
-            // Instantly update local bookings state
-            setMyBookings(prevBookings =>
-                prevBookings.map(b =>
-                    b.id === targetBookingId ? { ...b, status: 'CANCELLED' } : b
-                )
-            );
+            const bookingsRes = await apiClient.get(`${BOOKING_URL}/my-bookings`);
+            setMyBookings(bookingsRes.data);
 
             // Fetch the profile again to refresh the wallet balance dynamically!
             const profileRes = await apiClient.get(`${AUTH_URL}/profile`);
@@ -272,7 +310,7 @@ export default function PlayerProfile() {
                                 
                                 {cancelModal.preview.refundPercentage < 100 && (
                                     <p className="text-xs text-red-400 mt-3 bg-red-500/10 p-2 rounded">
-                                        Note: Late cancellations incur a penalty fee. The refund will be credited instantly to your digital wallet.
+                                        Late cancellations incur a penalty fee. Refunds are processed automatically and may take time if the wallet service is unavailable.
                                     </p>
                                 )}
                             </div>
@@ -517,12 +555,12 @@ export default function PlayerProfile() {
                                                         </span>
                                                     </h3>
                                                     <span className={`px-2 py-1 text-xs font-bold rounded ${active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                                                        {booking.status}
+                                                        {BOOKING_STATUS_LABELS[booking.status] || booking.status}
                                                     </span>
                                                 </div>
                                                 <div className="text-slate-400 grid grid-cols-2 md:flex md:gap-6 gap-y-2 text-sm font-medium">
                                                     <p><span className="text-slate-500">Date:</span> {booking.bookingDate}</p>
-                                                    <p><span className="text-slate-500">Paid:</span> <span className="text-emerald-400">₹{booking.totalAmount}</span></p>
+                                                    <p><span className="text-slate-500">Amount:</span> <span className="text-emerald-400">₹{booking.totalAmount}</span></p>
                                                     <p><span className="text-slate-500">Time:</span> {booking.startTime.substring(0, 5)} - {booking.endTime.substring(0, 5)}</p>
                                                 </div>
                                             </div>

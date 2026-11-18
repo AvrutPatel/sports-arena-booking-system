@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { persistentRequestKey } from '../api/requestKeys';
 import { Navigate } from 'react-router-dom';
 import apiClient, { VENUE_URL, BOOKING_URL } from '../api/apiClient';
 import { AuthContext } from '../context/AuthContext';
@@ -13,6 +14,8 @@ export default function ManageAcademy() {
     const [selectedVenue, setSelectedVenue] = useState(null);
     const [courts, setCourts] = useState([]);
     const [closures, setClosures] = useState([]); // NEW: Tracks active closures
+    const [bulkJobs, setBulkJobs] = useState([]);
+    const bulkInFlight = useRef(false);
 
     // Form States
     const [venueForm, setVenueForm] = useState({ description: '', amenities: [] });
@@ -26,11 +29,27 @@ export default function ManageAcademy() {
     // NEW: Reactivation Modal
     const [reactivateModal, setReactivateModal] = useState({ isOpen: false, closureId: null, targetName: '' });
 
-    if (!user || user.role !== 'ACADEMY_OWNER') return <Navigate to="/" />;
+    useEffect(() => {
+        if (user?.role === 'ACADEMY_OWNER') fetchMyVenues();
+    }, [user]);
 
     useEffect(() => {
-        fetchMyVenues();
-    }, []);
+        if (!selectedVenue || user?.role !== 'ACADEMY_OWNER') return;
+        let stopped = false;
+        let loading = false;
+        const refresh = async () => {
+            if (loading) return;
+            loading = true;
+            try {
+                const response = await apiClient.get(`${BOOKING_URL}/admin/bulk-jobs/venue/${selectedVenue.id}`);
+                if (!stopped) setBulkJobs(response.data);
+            } catch { /* Persisted jobs continue on the server. */ }
+            finally { loading = false; }
+        };
+        refresh();
+        const interval = setInterval(refresh, 5000);
+        return () => { stopped = true; clearInterval(interval); };
+    }, [selectedVenue, user]);
 
     const fetchMyVenues = async () => {
         try {
@@ -103,7 +122,9 @@ export default function ManageAcademy() {
 
     const executeBulkCancel = async () => {
         if (!cancelModal.startDate) return alert("You must select an effective date.");
-        
+        if (bulkInFlight.current) return;
+        bulkInFlight.current = true;
+        let request;
         try {
             const payload = {
                 venueId: selectedVenue.id, 
@@ -115,17 +136,23 @@ export default function ManageAcademy() {
                 message: cancelModal.message
             };
             
-            const response = await apiClient.post(`${BOOKING_URL}/admin/bulk-cancel`, payload);
-            alert(response.data);
+            request = persistentRequestKey(user.sub, 'bulk-cancel', payload);
+            const response = await apiClient.post(`${BOOKING_URL}/admin/bulk-cancel`, payload,
+                { headers: { 'Idempotency-Key': request.key } });
+            request.clear();
+            setBulkJobs(previous => [response.data, ...previous.filter(job => job.id !== response.data.id)]);
             
             setCancelModal({ isOpen: false, targetType: '', targetId: null, startDate: '', endDate: '', message: '' });
-            setStatusMessage({ type: 'success', text: 'Action executed successfully. Users notified.' });
+            setStatusMessage({ type: 'success', text: 'Closure saved. Cancellations and refunds will continue automatically.' });
             
             // Refresh closures to show the newly created roadblock in the table instantly
             fetchClosures(selectedVenue.id); 
         } catch (err) {
+            if (err.response && [400, 403, 404, 409].includes(err.response.status)) request?.clear();
             console.error(err);
-            alert("Engine failed to execute cancellation. Check backend logs.");
+            setStatusMessage({ type: 'error', text: err.response?.data || 'Could not confirm the request. Retrying will reuse the same request key.' });
+        } finally {
+            bulkInFlight.current = false;
         }
     };
 
@@ -137,14 +164,26 @@ export default function ManageAcademy() {
             setReactivateModal({ isOpen: false, closureId: null, targetName: '' });
             fetchClosures(selectedVenue.id); // Refresh list
         } catch (err) {
-            setStatusMessage({ type: 'error', text: 'Failed to reactivate facility.' });
+            setStatusMessage({ type: 'error', text: err.response?.data || 'Failed to reactivate facility.' });
         }
     };
 
+    if (!user || user.role !== 'ACADEMY_OWNER') return <Navigate to="/" />;
     return (
         <div className="max-w-6xl mx-auto mt-8 pb-16 relative">
             <h1 className="text-4xl font-bold text-amber-400 mb-2">Manage Academy</h1>
             <p className="text-slate-400 mb-8">Update details, adjust pricing, and manage operational status.</p>
+            {bulkJobs.length > 0 && selectedVenue && (
+                <div className="bg-slate-800 p-5 rounded-lg mb-6 border border-slate-700">
+                    <h2 className="text-lg font-bold text-white mb-3">Cancellation progress</h2>
+                    {bulkJobs.map(job => (
+                        <div key={job.id} className="text-sm text-slate-300 py-2 border-b border-slate-700 last:border-0">
+                            <span className="font-medium">{job.state === 'ENQUEUING' ? 'Preparing cancellations' : job.state === 'REFUNDS_PENDING' ? 'Refunds processing' : 'Completed'}</span>
+                            <span className="ml-3">{job.queuedBookings} bookings queued · {job.pendingRefunds} refunds or payments pending</span>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {statusMessage.text && (
                 <div className={`p-4 rounded-md mb-6 font-medium border ${statusMessage.type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500' : 'bg-red-500/20 text-red-400 border-red-500'}`}>

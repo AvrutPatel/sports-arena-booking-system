@@ -18,5 +18,8 @@ public class CourtRequestDto {
     private String sportType;
 
     @Min(value = 0, message = "Hourly rate cannot be negative")
-    private double hourlyRate;
+    @jakarta.validation.constraints.NotNull
+    @jakarta.validation.constraints.DecimalMin("0.01")
+    @jakarta.validation.constraints.Digits(integer = 17, fraction = 2)
+    private java.math.BigDecimal hourlyRate;
 }

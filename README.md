@@ -1,5 +1,7 @@
 # 🏟️ Sports Arena Booking Platform
 
+See [setup and GitHub publishing steps](docs/github-setup.md) for environment variables, verification commands, local startup, and pushing this repository. Safe application configs are included; real credentials must be supplied locally.
+
 A full-stack, distributed microservices platform designed for managing and booking sports academies. Built using the BMAD (Build More, Architect Dreams) methodology, this system provides a seamless experience for both players and academy owners, featuring dynamic slot computation, cross-service digital wallets, and automated refund policies.
 
 ## 🚀 Key Features
@@ -34,8 +36,9 @@ The backend is structurally decoupled into specialized, independent services com
 ### 3. Booking Service (`transaction-engine`)
 * Handles the lifecycle of a `Booking`.
 * Executes the dynamic slot algorithm and concurrency checks.
-* Coordinates cross-service communication (e.g., pinging the Auth Service to deduct funds before committing a booking to the database).
+* Creates a temporary reservation, then coordinates wallet deduction outside database transactions before confirming the booking.
 * Manages `FacilityClosure` logic for maintenance roadblocks.
+* Verifies owner administration with venue-service, coordinates closures with reservations, persists restart-safe bulk cancellation jobs, and deduplicates booking requests. See [booking administration rollout](docs/booking-administration.md).
 
 ---
 
@@ -44,15 +47,15 @@ The backend is structurally decoupled into specialized, independent services com
 ### 1. Dynamic Slot Computation Algorithm
 Instead of hardcoding time slots in the database, the system calculates available slots on the fly.
 * **Mechanism:** The engine generates 1-hour intervals between facility operating hours (e.g., 06:00 to 22:00).
-* **Evaluation:** It loops through existing `CONFIRMED` bookings for the requested date. If a generated slot overlaps with an active booking's `startTime` and `endTime`, or if the time has already passed in the real world, the slot is dynamically stripped from the availability timeline.
+* **Evaluation:** It checks confirmed bookings and active holds (`PENDING`, `PAYMENT_PROCESSING`, `PAYMENT_UNKNOWN`) for the requested date. Overlapping or past slots appear unavailable.
 
 ### 2. Concurrency Control (Double-Booking Prevention)
-* **Mechanism:** Implements a strict JPA/SQL aggregation check: `countOverlappingBookings`. 
-* **Evaluation:** Before committing a transaction, the database counts any existing records where the requested start/end times intersect. If the count is `> 0`, the transaction is rolled back, preventing race conditions during high-traffic booking windows.
+* **Mechanism:** Uses permanent venue and court coordination rows, locked in that order. An ordinary JPQL update acquires its transactional write lock. The same short `READ_COMMITTED` transaction checks closures and overlaps and creates the hold before releasing the court lock.
+* **Evaluation:** Competing writes for the same court serialize, including its first booking. Conflicting requests return `409 Conflict`. Expiry and payment transitions use the same coordination. See [reservation design, rollout, and tests](docs/booking-reservations.md).
 
 ### 3. Cross-Service Wallet Deduction Protocol
-* **Mechanism:** Distributed Transaction Simulation.
-* **Evaluation:** When a player initiates a booking, the Booking Service intercepts the JWT token and fires a synchronous HTTP request to the Auth Service to deduct the `totalAmount`. If the Auth Service throws a `400 Bad Request` (Insufficient Funds), the Booking Service intercepts the exception and aborts the booking process. 
+* **Mechanism:** A persisted reservation and idempotent wallet operation, with separate short database transactions.
+* **Evaluation:** Claiming a hold persists a recovery task. Service-authenticated workers use stable operation IDs, retry uncertain payments/refunds, release expired payment inventory, and refund late successful charges. See [automatic recovery and rollout](docs/automatic-recovery.md).
 
 ### 4. Dynamic Refund & Cancellation Policy Engine
 Calculates penalty fees mathematically based on proximity to the booking date.
@@ -94,4 +97,4 @@ To maintain strict domain isolation, database tables do not use hard foreign key
 * REST APIs (`RestTemplate` for microservice orchestration)
 
 **Database**
-* PostgreSQL / MySQL (Configured via `application.properties`)
+* PostgreSQL (current runtime driver/configuration); H2 and HSQLDB for automated tests.

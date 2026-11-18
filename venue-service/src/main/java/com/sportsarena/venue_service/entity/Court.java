@@ -3,6 +3,7 @@ package com.sportsarena.venue_service.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "courts")
@@ -23,7 +24,8 @@ public class Court {
 
     private String sportType; // e.g., BADMINTON, TENNIS, FOOTBALL
 
-    private double hourlyRate;
+    @Column(nullable = false, precision = 19, scale = 2)
+    private BigDecimal hourlyRate;
 
     private boolean isActive = true;
 }

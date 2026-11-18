@@ -15,6 +15,18 @@ import org.springframework.stereotype.Service;
 @Service
 public class VenueService {
 
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public com.sportsarena.venue_service.dto.BookingManagementScope bookingManagementScope(Long venueId) {
+        Venue venue = venueRepository.findById(venueId).orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND, "Venue not found."));
+        String caller = SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!venue.getOwnerId().equalsIgnoreCase(caller)) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
+                    "You do not own this venue.");
+        }
+        return new com.sportsarena.venue_service.dto.BookingManagementScope(venueId, null);
+    }
+
     @Autowired
     private VenueRepository venueRepository;
 

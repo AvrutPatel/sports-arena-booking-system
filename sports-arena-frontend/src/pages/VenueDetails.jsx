@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { persistentRequestKey } from '../api/requestKeys';
 import { useParams, useNavigate } from 'react-router-dom';
 import apiClient, { VENUE_URL, BOOKING_URL, REVIEW_URL } from '../api/apiClient';
 import { AuthContext } from '../context/AuthContext';
@@ -18,6 +19,7 @@ export default function VenueDetails() {
 
     const [slots, setSlots] = useState([]);
     const [selectedSlot, setSelectedSlot] = useState(null);
+    const bookingInFlight = useRef(false);
 
     const [isLoading, setIsLoading] = useState(true);
     const [bookingMessage, setBookingMessage] = useState({ type: '', text: '' });
@@ -120,6 +122,9 @@ export default function VenueDetails() {
         }
 
         setBookingMessage({ type: '', text: '' });
+        if (bookingInFlight.current || !selectedCourt || !selectedSlot) return;
+        bookingInFlight.current = true;
+        let request;
 
         try {
             const payload = {
@@ -127,12 +132,13 @@ export default function VenueDetails() {
                 courtId: selectedCourt.id,
                 bookingDate: selectedDate,
                 startTime: selectedSlot.startTime,
-                endTime: selectedSlot.endTime,
-                totalAmount: selectedCourt.hourlyRate
+                endTime: selectedSlot.endTime
             };
             console.log("id sent : ",id);
 
-            const response = await apiClient.post(BOOKING_URL, payload);
+            request = persistentRequestKey(user.sub, 'booking', payload);
+            const response = await apiClient.post(BOOKING_URL, payload, { headers: { 'Idempotency-Key': request.key } });
+            if (response.status !== 202) request.clear();
             setBookingMessage({ type: 'success', text: response.data });
 
             // Re-fetch slots to instantly show it as unavailable
@@ -143,10 +149,14 @@ export default function VenueDetails() {
             setSelectedSlot(null);
 
         } catch (err) {
+            // An acknowledged rejection ends this intent; network/server failures retain the original key.
+            if (err.response && [400, 403, 404, 409].includes(err.response.status)) request?.clear();
             setBookingMessage({
                 type: 'error',
                 text: err.response?.data || 'Failed to book slot. It might have just been taken!'
             });
+        } finally {
+            bookingInFlight.current = false;
         }
     };
 

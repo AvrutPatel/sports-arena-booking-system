@@ -16,6 +16,12 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/venues")
 public class VenueController {
 
+    @GetMapping("/{venueId}/booking-management")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
+    public BookingManagementScope bookingManagement(@PathVariable Long venueId) {
+        return venueRepositoryService.bookingManagementScope(venueId);
+    }
+
     @Autowired
     private VenueService venueRepositoryService;
 
@@ -30,6 +36,7 @@ public class VenueController {
     }
 
     @GetMapping("/my-venues")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
     public ResponseEntity<List<VenueResponseDto>> getMyVenues() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.ok(venueRepositoryService.getMyVenues(email));
@@ -50,6 +57,7 @@ public class VenueController {
     }
 
     @PatchMapping("/{venueId}/details")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
     public ResponseEntity<VenueResponseDto> updateVenueDetails(
             @PathVariable Long venueId,
             @RequestBody VenueUpdateRequestDto dto) {
@@ -60,9 +68,10 @@ public class VenueController {
 
     //Endpoint to update a Court's Hourly Rate
     @PatchMapping("/courts/{courtId}/rate")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
     public ResponseEntity<CourtResponseDto> updateCourtRate(
             @PathVariable Long courtId,
-            @RequestBody CourtUpdateRequestDto dto) {
+            @Valid @RequestBody CourtUpdateRequestDto dto) {
 
         String ownerId = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.ok(courtService.updateCourtRate(courtId, dto.getHourlyRate(), ownerId));

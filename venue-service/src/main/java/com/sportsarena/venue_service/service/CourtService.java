@@ -18,6 +18,28 @@ import java.util.stream.Collectors;
 @Service
 public class CourtService {
 
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public CourtResponseDto getActiveCourt(Long courtId) {
+        Court court = courtRepository.findById(courtId).filter(Court::isActive)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Active court not found."));
+        CourtResponseDto dto = modelMapper.map(court, CourtResponseDto.class);
+        dto.setVenueId(court.getVenue().getId());
+        return dto;
+    }
+
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public com.sportsarena.venue_service.dto.BookingManagementScope bookingManagementScope(Long courtId) {
+        Court court = courtRepository.findById(courtId).orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND, "Court not found."));
+        String caller = SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!court.getVenue().getOwnerId().equalsIgnoreCase(caller)) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
+                    "You do not own this court.");
+        }
+        return new com.sportsarena.venue_service.dto.BookingManagementScope(court.getVenue().getId(), courtId);
+    }
+
     @Autowired
     private CourtRepository courtRepository;
 
@@ -72,7 +94,7 @@ public class CourtService {
     }
 
     // to update court pricing
-    public CourtResponseDto updateCourtRate(Long courtId, Double newRate, String ownerId) {
+    public CourtResponseDto updateCourtRate(Long courtId, java.math.BigDecimal newRate, String ownerId) {
         Court court = courtRepository.findById(courtId)
                 .orElseThrow(() -> new RuntimeException("Court not found"));
 

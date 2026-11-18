@@ -31,10 +31,11 @@ apiClient.interceptors.response.use(
 );
 
 // Exporting your three microservice base URLs for easy access
-export const AUTH_URL = 'http://localhost:8080/api/auth';
-export const VENUE_URL = 'http://localhost:8080/api';
-export const BOOKING_URL = 'http://localhost:8080/api/bookings';
-export const REVIEW_URL = 'http://localhost:8080/api/reviews';
-export const NOTIFICATION_URL = 'http://localhost:8080/api/notifications';
+const gatewayUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
+export const AUTH_URL = `${gatewayUrl}/api/auth`;
+export const VENUE_URL = `${gatewayUrl}/api`;
+export const BOOKING_URL = `${gatewayUrl}/api/bookings`;
+export const REVIEW_URL = `${gatewayUrl}/api/reviews`;
+export const NOTIFICATION_URL = `${gatewayUrl}/api/notifications`;
 
 export default apiClient;

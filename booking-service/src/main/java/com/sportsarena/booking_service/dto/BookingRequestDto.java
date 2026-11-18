@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.math.BigDecimal;
 
 @Data
 public class BookingRequestDto {
@@ -23,5 +24,6 @@ public class BookingRequestDto {
     @NotNull(message = "Venue ID is required")
     private Long venueId;
 
-    private double totalAmount;
+    // Retained for old clients; the server calculates and stores the actual price.
+    private BigDecimal totalAmount;
 }

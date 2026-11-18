@@ -17,6 +17,15 @@ import java.util.List;
 @RequestMapping("/api/courts")
 public class CourtController {
 
+    @GetMapping("/{courtId}")
+    public CourtResponseDto getCourt(@PathVariable Long courtId) { return courtService.getActiveCourt(courtId); }
+
+    @GetMapping("/{courtId}/booking-management")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
+    public com.sportsarena.venue_service.dto.BookingManagementScope bookingManagement(@PathVariable Long courtId) {
+        return courtService.bookingManagementScope(courtId);
+    }
+
     @Autowired
     private CourtService courtService;
 
@@ -35,9 +44,10 @@ public class CourtController {
     }
 
     @PatchMapping("/{courtId}/rate")
+    @PreAuthorize("hasRole('ACADEMY_OWNER')")
     public ResponseEntity<CourtResponseDto> updateCourtRate(
             @PathVariable Long courtId,
-            @RequestBody CourtUpdateRequestDto dto) {
+            @Valid @RequestBody CourtUpdateRequestDto dto) {
 
         String ownerId = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.ok(courtService.updateCourtRate(courtId, dto.getHourlyRate(), ownerId));

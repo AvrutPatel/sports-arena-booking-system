@@ -6,6 +6,8 @@ import com.sportsarena.booking_service.entity.Booking;
 import com.sportsarena.booking_service.entity.FacilityClosure;
 import com.sportsarena.booking_service.repository.FacilityClosureRepository;
 import com.sportsarena.booking_service.service.BookingService;
+import com.sportsarena.booking_service.service.BookingAdministrationService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -29,6 +31,7 @@ public class BookingController {
 
     @Autowired
     private FacilityClosureRepository closureRepository;
+    @Autowired private BookingAdministrationService administration;
 
     // Public slot checker mapping
     @GetMapping("/slots")
@@ -40,9 +43,12 @@ public class BookingController {
 
     // Secure booking registration endpoint
     @PostMapping
-    public ResponseEntity<String> processReservation(@Valid @RequestBody BookingRequestDto request) {
-        String confirmation = bookingService.checkAndCreateBooking(request);
-        return ResponseEntity.ok(confirmation);
+    public ResponseEntity<String> processReservation(@Valid @RequestBody BookingRequestDto request,
+            @RequestHeader("Idempotency-Key") UUID requestKey) {
+        BookingService.BookingOutcome result = bookingService.checkAndCreateBooking(request, requestKey);
+        int status = "CONFIRMED".equals(result.status()) || "CANCELLED".equals(result.status()) ? 200
+                : "FAILED".equals(result.status()) || "EXPIRED".equals(result.status()) ? 409 : 202;
+        return ResponseEntity.status(status).header("X-Booking-Id", result.bookingId().toString()).body(result.message());
     }
 
     // Fetch history for the logged-in user
@@ -67,17 +73,19 @@ public class BookingController {
     }
 
     @PostMapping("/admin/bulk-cancel")
-    public ResponseEntity<String> bulkCancel(@RequestBody BulkCancelRequestDto request) {
-
-        // Security check to ensure only owners can trigger this mass-delete
-        String role = SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
-        if (!role.contains("ACADEMY_OWNER")) {
-            return ResponseEntity.status(403).body("Unauthorized: Only owners can perform bulk cancellations.");
-        }
-
-        int canceledCount = bookingService.bulkCancelBookings(request);
-        return ResponseEntity.ok("Successfully canceled " + canceledCount + " bookings and notified the affected players.");
+    @PreAuthorize("hasAnyAuthority('ACADEMY_OWNER','ROLE_ACADEMY_OWNER')")
+    public ResponseEntity<BookingAdministrationService.JobView> bulkCancel(@Valid @RequestBody BulkCancelRequestDto request,
+            @RequestHeader("Idempotency-Key") UUID key) {
+        return ResponseEntity.accepted().body(administration.submit(request, key));
     }
+
+    @GetMapping("/admin/bulk-jobs/{jobId}")
+    @PreAuthorize("hasAnyAuthority('ACADEMY_OWNER','ROLE_ACADEMY_OWNER')")
+    public BookingAdministrationService.JobView bulkJob(@PathVariable UUID jobId) { return administration.status(jobId); }
+
+    @GetMapping("/admin/bulk-jobs/venue/{venueId}")
+    @PreAuthorize("hasAnyAuthority('ACADEMY_OWNER','ROLE_ACADEMY_OWNER')")
+    public List<BookingAdministrationService.JobView> bulkJobs(@PathVariable Long venueId) { return administration.list(venueId); }
 
     // GET: /api/bookings/closures/check?venueId=7&courtId=3&date=2026-05-25
     @GetMapping("/closures/check")
@@ -114,7 +122,7 @@ public class BookingController {
         String role = SecurityContextHolder.getContext().getAuthentication().getAuthorities().toString();
         if (!role.contains("ACADEMY_OWNER")) return ResponseEntity.status(403).build();
 
-        bookingService.removeClosure(closureId);
+        administration.removeClosure(closureId);
         return ResponseEntity.ok("Facility successfully reactivated.");
     }
 
